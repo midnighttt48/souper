@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Souper</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#fffaf0;--card:#fff;--ink:#2b2a28;--mut:#7a7468;--acc:#e8a317;--acc2:#fdeab0;--line:#e6dcc3;--bad:#c0392b}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#1d1b17;--card:#2a2721;--ink:#f3ece0;--mut:#a69f90;--acc:#f0b429;--acc2:#4a3d17;--line:#3d382d;--bad:#ff7b6b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:18px 0 8px}
+.mut{color:var(--mut);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+input,button{font:inherit;color:inherit}
+input{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+button{padding:10px 14px;border:0;border-radius:10px;background:var(--acc);color:#2b2a28;font-weight:600;cursor:pointer}
+button.sec{background:var(--acc2);color:var(--ink)}button.del{background:none;color:var(--bad);padding:4px 8px}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:4px 0}.tabs button{background:var(--acc2);color:var(--ink);white-space:nowrap}.tabs button.on{background:var(--acc);color:#2b2a28}
+.row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin:8px 0}
+.row .n{flex:1}.qty{display:flex;align-items:center;gap:10px}.qty button{width:38px;padding:8px}.qty b{min-width:22px;text-align:center}
+.tot{font-size:20px;font-weight:700;text-align:right}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}
+.wrap{overflow-x:auto}.grid{display:grid;grid-template-columns:1fr 70px 70px auto;gap:6px;align-items:center;margin:6px 0}
+.err{color:var(--bad);font-size:14px;min-height:20px}
+</style>
+</head>
+<body>
+<main id="app"><p class="mut">Chargement…</p></main>
+<script>
+const URL_='https://ntzacfqooincmhlspcrs.supabase.co',KEY='sb_publishable_BWv2v1W9krBptiX8T1DMzQ_sZz-YUQy';
+const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eur=n=>(Math.round(n*100)/100).toFixed(2).replace('.',',')+' €';
+const $=s=>document.querySelector(s);
+let me=null,quiches=[],orders=[],keys=[],tab='new',cart={},err='';
+const app=$('#app');
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const isAdmin=()=>me&&me.role==='admin';
+async function rpc(fn,args){
+  const r=await fetch(URL_+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify(args||{})});
+  const t=await r.text();if(!r.ok)throw new Error(t);return t?JSON.parse(t):null;
+}
+async function load(){
+  const p=[rpc('s_get_menus',{p_code:me.code}),rpc('s_get_orders',{p_code:me.code})];
+  if(isAdmin())p.push(rpc('s_get_keys',{p_code:me.code}));
+  const [q,o,k]=await Promise.all(p);
+  quiches=q||[];orders=(o||[]).map(x=>({...x,createdAt:new Date(x.created_at).getTime()}));keys=k||[];
+}
+async function init(){const s=store.get('souper-code');if(s)await login(s,true);else renderLogin()}
+function renderLogin(){
+  app.innerHTML=`<h1>🍽️ Souper</h1><p class="mut">Entre ta clé d'accès personnelle.</p>
+  <div class="card"><input id="code" placeholder="Ton prénom ou ta clé" autocapitalize="characters" autocomplete="off"><div class="err" id="err">${E(err)}</div><button id="go">Entrer</button></div>`;
+  $('#go').onclick=()=>login($('#code').value);
+  $('#code').onkeydown=e=>{if(e.key==='Enter')login($('#code').value)};
+}
+async function login(raw,silent){
+  const code=raw.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(!code)return;
+  try{
+    const u=await rpc('s_login',{p_code:code});
+    if(!u){err=silent?'':'Clé inconnue.';store.set('souper-code','');return renderLogin()}
+    me=u;store.set('souper-code',code);err='';await load();render();
+  }catch(e){err='Connexion impossible. Réessaie dans un instant.';renderLogin()}
+}
+async function refresh(){try{await load();render()}catch(e){}}
+function render(){
+  if(!me)return;
+  const t=[['new','Commander'],['mine',isAdmin()?'Mes ventes':'Mes commandes']];
+  if(isAdmin())t.push(['all','Toutes'],['totals','Totaux'],['menu','Menus'],['keys','Clés']);
+  if(!t.find(x=>x[0]===tab))tab='new';
+  app.innerHTML=`<div class="row"><div><h1>🍽️ Souper</h1><div class="mut">${E(me.label)}${isAdmin()?' · admin':''}</div></div><button class="sec" id="out">Quitter</button></div>
+  <div class="tabs">${t.map(x=>`<button class="${tab===x[0]?'on':''}" data-t="${x[0]}">${x[1]}</button>`).join('')}</div><div id="v"></div>`;
+  $('#out').onclick=()=>{store.set('souper-code','');me=null;renderLogin()};
+  document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;render()});
+  ({new:vNew,mine:vMine,all:vAll,totals:vTotals,menu:vMenu,keys:vKeys})[tab]($('#v'));
+}
+function cartTotals(){let q=0,a=0;quiches.forEach(x=>{const n=cart[x.id]||0;q+=n;a+=n*x.price});return{q,a}}
+function vNew(v){
+  const c=cartTotals();
+  v.innerHTML=`<div class="card"><input id="cust" placeholder="Nom de la personne" value="${E(cart._c||'')}">
+  ${quiches.length?quiches.map(x=>`<div class="row"><div class="n">${E(x.name)}<div class="mut">${eur(x.price)}</div></div><div class="qty"><button class="sec" data-m="${x.id}">−</button><b>${cart[x.id]||0}</b><button data-p="${x.id}">+</button></div></div>`).join(''):'<p class="mut">Aucun menu pour le moment.</p>'}
+  <div class="tot">Total : ${eur(c.a)}</div><div class="err" id="err">${E(err)}</div><button id="save" style="width:100%">Enregistrer la commande</button></div>`;
+  $('#cust').oninput=e=>cart._c=e.target.value;
+  v.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{cart[b.dataset.p]=(cart[b.dataset.p]||0)+1;render()});
+  v.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{cart[b.dataset.m]=Math.max(0,(cart[b.dataset.m]||0)-1);render()});
+  $('#save').onclick=async()=>{
+    const name=(cart._c||'').trim();
+    if(!name){err='Indique le nom du client.';return render()}
+    const lines=quiches.filter(x=>cart[x.id]>0).map(x=>({id:x.id,qty:cart[x.id]}));
+    if(!lines.length){err='Choisis au moins une quiche.';return render()}
+    $('#save').disabled=true;
+    try{await rpc('s_add_order',{p_code:me.code,p_customer:name,p_lines:lines});cart={};err='';tab='mine';await load();render()}
+    catch(e){err="Enregistrement impossible, réessaie.";render()}
+  };
+}
+const orderCard=(o,all)=>`<div class="card"><div class="row"><b>${E(o.customer)}</b><span class="tot" style="font-size:16px">${eur(o.amount)}</span></div>
+  <div class="mut">${o.lines.map(l=>l.qty+'× '+E(l.name)).join(' · ')}</div>
+  ${o.paid?`<div class="row"><button data-pay="${o.id}" style="background:#2e9e5b;color:#fff">✓ Payé${o.method?' · '+(o.method==='virement'?'Virement':'Liquide'):''}</button><span class="mut">${o.paid_at?'le '+new Date(o.paid_at).toLocaleDateString('fr-BE'):''}</span></div>`:`<div class="mut">⏳ Pas encore payé</div><div class="row"><button class="sec" data-pay="${o.id}" data-meth="liquide">💶 Payé en liquide</button><button class="sec" data-pay="${o.id}" data-meth="virement">🏦 Payé par virement</button></div>`}
+  <div class="row"><span class="mut">${all?E(o.seller_name)+' · ':''}${new Date(o.createdAt).toLocaleString('fr-BE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span><button class="del" data-d="${o.id}">Supprimer</button></div></div>`;
+function bindPay(v){v.querySelectorAll('[data-pay]').forEach(b=>b.onclick=async()=>{const o=orders.find(x=>x.id===b.dataset.pay);if(!o)return;const m=b.dataset.meth;if(!b.dataset.ok){b.dataset.ok=1;b.textContent=o.paid?'Annuler le paiement ?':'Confirmer : '+o.customer+' a payé '+eur(o.amount)+(m==='virement'?' par virement ?':' en liquide ?');b.style.background='var(--acc)';b.style.color='#2b2a28';setTimeout(()=>{if(b.isConnected&&b.dataset.ok)render()},5000);return}try{await rpc('s_set_payment',{p_code:me.code,p_id:o.id,p_paid:!o.paid,p_method:m||null});await refresh()}catch(e){b.textContent='Refusé'}})}
+function bindDel(v){bindPay(v);v.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{if(confirm('Supprimer cette commande ?'))try{await rpc('s_delete_order',{p_code:me.code,p_id:b.dataset.d});await refresh()}catch(e){alert('Suppression impossible.')}})}
+function vMine(v){
+  const m=orders.filter(o=>o.seller===me.code),q=m.reduce((s,o)=>s+o.qty,0),a=m.reduce((s,o)=>s+Number(o.amount),0);
+  v.innerHTML=`<div class="card"><b>${m.length}</b> commande(s) · <b>${q}</b> repas · <b>${eur(a)}</b><div class="mut">À encaisser : ${eur(m.filter(o=>!o.paid).reduce((x,o)=>x+Number(o.amount),0))}</div></div>`+(m.map(o=>orderCard(o,false)).join('')||'<p class="mut">Aucune commande pour l\'instant.</p>');bindDel(v);
+}
+function vAll(v){v.innerHTML=(orders.map(o=>orderCard(o,true)).join('')||'<p class="mut">Aucune commande.</p>');bindDel(v)}
+function vTotals(v){
+  const by={};keys.forEach(k=>by[k.code]={n:k.label,o:0,q:0,a:0});
+  const per={};quiches.forEach(x=>per[x.id]={n:x.name,q:0,a:0});
+  let T={q:0,a:0,c:0,p:0,l:0,v:0};
+  orders.forEach(o=>{const s=by[o.seller]||(by[o.seller]={n:o.seller_name,o:0,q:0,a:0});s.o++;s.q+=o.qty;s.a+=Number(o.amount);T.q+=o.qty;T.a+=Number(o.amount);T.c+=Number(o.cost);if(o.paid){s.p=(s.p||0)+Number(o.amount);T.p+=Number(o.amount);if(o.method==='virement')T.v+=Number(o.amount);else T.l+=Number(o.amount)}o.lines.forEach(l=>{const p=per[l.id]||(per[l.id]={n:l.name,q:0,a:0});p.q+=l.qty;p.a+=l.qty*l.price})});
+  v.innerHTML=`<div class="card"><div class="row"><span>Repas vendus</span><b>${T.q}</b></div><div class="row"><span>Recettes</span><b>${eur(T.a)}</b></div><div class="row"><span>Déjà encaissé</span><b>${eur(T.p)}</b></div><div class="mut">dont liquide ${eur(T.l)} · virement ${eur(T.v)}</div><div class="row"><span>Reste à encaisser</span><b>${eur(T.a-T.p)}</b></div><div class="row"><span>Coût total</span><b>${eur(T.c)}</b></div><div class="row"><span>Bénéfice</span><b>${eur(T.a-T.c)}</b></div></div>
+  <h2>Par élève</h2><div class="card wrap"><table><tr><th>Élève</th><th>Cmd</th><th>Repas</th><th>Total</th><th>Reste</th></tr>${Object.values(by).sort((a,b)=>b.a-a.a).map(s=>`<tr><td>${E(s.n)}</td><td>${s.o}</td><td>${s.q}</td><td>${eur(s.a)}</td><td>${eur(s.a-(s.p||0))}</td></tr>`).join('')}</table></div>
+  <h2>Par menu</h2><div class="card wrap"><table><tr><th>Menu</th><th>Quantité</th><th>Total</th></tr>${Object.values(per).map(s=>`<tr><td>${E(s.n)}</td><td>${s.q}</td><td>${eur(s.a)}</td></tr>`).join('')}</table></div>
+  <button class="sec" id="rf" style="width:100%">Actualiser</button>`;
+  $('#rf').onclick=refresh;
+}
+function vMenu(v){
+  v.innerHTML=`<p class="mut">Prix de vente et coût d'achat par menu. Les commandes déjà enregistrées gardent leurs anciens prix.</p><div class="card">
+  <div class="grid mut"><span>Nom</span><span>Prix</span><span>Coût</span><span></span></div>
+  ${quiches.map(x=>`<div class="grid" data-q="${x.id}"><input value="${E(x.name)}" data-f="name"><input type="number" step="0.01" value="${x.price}" data-f="price"><input type="number" step="0.01" value="${x.cost}" data-f="cost"><button class="del" data-x="${x.id}">✕</button></div>`).join('')}
+  <button class="sec" id="add" style="width:100%;margin-top:8px">+ Ajouter un menu</button></div>`;
+  const save=async(id,name,price,cost,pos)=>{try{await rpc('s_save_menu',{p_code:me.code,p_id:id,p_name:name,p_price:price,p_cost:cost,p_pos:pos});await load()}catch(e){alert('Enregistrement impossible.')}};
+  v.querySelectorAll('[data-q]').forEach(r=>r.querySelectorAll('[data-f]').forEach(i=>i.onchange=async()=>{
+    const g=f=>r.querySelector(`[data-f=${f}]`).value;
+    await save(r.dataset.q,g('name').trim()||'Menu',parseFloat(g('price'))||0,parseFloat(g('cost'))||0,0);
+  }));
+  v.querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{if(confirm('Supprimer ce menu ?')){try{await rpc('s_delete_menu',{p_code:me.code,p_id:b.dataset.x});await load();render()}catch(e){alert('Suppression impossible.')}}});
+  $('#add').onclick=async()=>{await save('q'+Date.now(),'Nouveau menu',10,0,quiches.length+1);render()};
+}
+function vKeys(v){
+  const l=[...keys].sort((a,b)=>(a.role===b.role?a.label.localeCompare(b.label,'fr',{numeric:true}):a.role==='admin'?-1:1));
+  v.innerHTML=`<p class="mut">Renomme chaque clé avec le prénom de l'élève, puis transmets-lui sa clé.</p><div class="card">${l.map(k=>`<div class="grid" style="grid-template-columns:1fr 90px" data-k="${k.code}"><input value="${E(k.label)}"><b>${E(k.code)}</b></div>`).join('')}</div>`;
+  v.querySelectorAll('[data-k] input').forEach(i=>i.onchange=async()=>{try{await rpc('s_rename_key',{p_code:me.code,p_target:i.closest('[data-k]').dataset.k,p_label:i.value})}catch(e){alert('Impossible.')}});
+}
+setInterval(()=>{if(me&&['mine','all','totals'].includes(tab))refresh()},15000);
+init();
+</script>
+</body>
+</html>
